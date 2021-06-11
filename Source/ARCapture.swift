@@ -148,8 +148,10 @@ open class ARCapture {
     
     /// Start/stop external frame processor (implementing delegate protocol)
     /// - Parameter start: true - start, false - stop
-    public func frameProcessor(start: Bool) {
+    public func frameProcessor(start: Bool, captureType: ARFrameGenerator.CaptureType? = nil) {
         if start {
+            let type: ARFrameGenerator.CaptureType = captureType ?? (ARCapture.Orientation.isPortrait ? .renderOriginal : .imageCapture)
+            frameGenerator = ARFrameGenerator(captureType: type)
             self.status = .recording
             self.displayTimer.isPaused = false
         }
@@ -160,8 +162,10 @@ open class ARCapture {
     }
     
     /// Capture image
-    public func image() -> UIImage? {
-        guard let frame = frameGenerator?.getFrame(from: view, renderer: renderer, time: CACurrentMediaTime()), let buffer = frame.1 else { return nil }
+    public func image(captureType: ARFrameGenerator.CaptureType? = nil) -> UIImage? {
+        let type: ARFrameGenerator.CaptureType = captureType ?? (ARCapture.Orientation.isPortrait ? .renderOriginal : .imageCapture)
+        let frameGenerator = ARFrameGenerator(captureType: type)
+        guard let frame = frameGenerator.getFrame(from: view, renderer: renderer, time: CACurrentMediaTime()), let buffer = frame.1 else { return nil }
         return UIImage(ciImage: CIImage(cvPixelBuffer: buffer))
     }
     
