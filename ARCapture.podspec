@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name        = "ARCapture"
-  s.version     = "0.1.0"
+  s.version     = "0.1.1"
   s.summary     = "Utility allows to capture videos from ARKit scene and export to Photos app."
   s.homepage    = "https://gitlab.com/seriyvolk83/ARCapture"
   s.license     = { :type => "MIT" }

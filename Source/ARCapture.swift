@@ -140,10 +140,31 @@ open class ARCapture {
                 } else {
                     complete?(false)
                 }
+                self?.displayTimer.isPaused = true
                 self?.assetCreator = nil
             }
         }
     }
+    
+    /// Start/stop external frame processor (implementing delegate protocol)
+    /// - Parameter start: true - start, false - stop
+    public func frameProcessor(start: Bool) {
+        if start {
+            self.status = .recording
+            self.displayTimer.isPaused = false
+        }
+        else {
+            self.status = .ready
+            self.displayTimer.isPaused = true
+        }
+    }
+    
+    /// Capture image
+    public func image() -> UIImage? {
+        guard let frame = frameGenerator?.getFrame(from: view, renderer: renderer, time: CACurrentMediaTime()), let buffer = frame.1 else { return nil }
+        return UIImage(ciImage: CIImage(cvPixelBuffer: buffer))
+    }
+    
     
     /// Add video to library from temporary file URL
     /// - Parameters:

@@ -158,8 +158,8 @@ class ARAssetCreator: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
         guard let input = audioInput else { return }
         audioQueue.async { [weak self] in
             if let needRecordAudio = self?.needRecordAudio, needRecordAudio,
-               let session = self?.session, session.isRunning,
-               input.isReadyForMoreMediaData {
+                let session = self?.session, session.isRunning,
+                input.isReadyForMoreMediaData {
                 input.append(sampleBuffer)
             }
         }
