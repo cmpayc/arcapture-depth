@@ -142,6 +142,7 @@ open class ARCapture {
                 }
                 self?.displayTimer.isPaused = true
                 self?.assetCreator = nil
+                self?.frameGenerator = nil
             }
         }
     }
@@ -158,6 +159,7 @@ open class ARCapture {
         else {
             self.status = .ready
             self.displayTimer.isPaused = true
+            frameGenerator = nil
         }
     }
     

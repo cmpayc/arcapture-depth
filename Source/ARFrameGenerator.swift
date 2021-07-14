@@ -90,34 +90,45 @@ public class ARFrameGenerator {
 
 extension UIImage {
     
-    // dodo change
+    /// Get buffer with pixels from image
+    /// - Parameters:
+    ///   - angle: the angle to apply
+    ///   - originalSize: the original size
     public func getBuffer(angle: CGFloat?, originalSize: CGSize) -> CVPixelBuffer? {
         let size = self.size
-        let attrs = [kCVPixelBufferCGImageCompatibilityKey: kCFBooleanTrue,
-                     kCVPixelBufferCGBitmapContextCompatibilityKey: kCFBooleanTrue] as CFDictionary
-        var pixelBuffer: CVPixelBuffer?
-        let res = CVPixelBufferCreate(kCFAllocatorDefault, Int(size.width), Int(size.height), kCVPixelFormatType_32ARGB, attrs, &pixelBuffer)
+        var buff: CVPixelBuffer?
+        let res = CVPixelBufferCreate(kCFAllocatorDefault,
+                                      Int(size.width),
+                                      Int(size.height),
+                                      kCVPixelFormatType_32ARGB,
+                                      [kCVPixelBufferCGImageCompatibilityKey: kCFBooleanTrue,
+                                       kCVPixelBufferCGBitmapContextCompatibilityKey: kCFBooleanTrue] as CFDictionary,
+                                      &buff)
         guard res == kCVReturnSuccess else { return nil }
         
-        CVPixelBufferLockBaseAddress(pixelBuffer!, CVPixelBufferLockFlags(rawValue: 0))
+        CVPixelBufferLockBaseAddress(buff!, CVPixelBufferLockFlags(rawValue: 0))
         
-        let rgbColorSpace = CGColorSpaceCreateDeviceRGB()
-        let context = CGContext(data: CVPixelBufferGetBaseAddress(pixelBuffer!), width: Int(size.width), height: Int(size.height), bitsPerComponent: 8, bytesPerRow: CVPixelBufferGetBytesPerRow(pixelBuffer!), space: rgbColorSpace, bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue)
+        guard let c = CGContext(data: CVPixelBufferGetBaseAddress(buff!),
+                                width: Int(size.width),
+                                height: Int(size.height),
+                                bitsPerComponent: 8,
+                                bytesPerRow: CVPixelBufferGetBytesPerRow(buff!),
+                                space: CGColorSpaceCreateDeviceRGB(),
+                                bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue) else { return nil}
         
         if let angle = angle {
-            context?.rotate(by: angle)
-            context?.translateBy(x: 0, y: 0)
-            context?.scaleBy(x: 1.0, y: -1.0)
+            c.rotate(by: angle)
+            c.translateBy(x: 0, y: 0)
         }
         else {
-            context?.translateBy(x: 0, y: size.height)
-            context?.scaleBy(x: 1.0, y: -1.0)
+            c.translateBy(x: 0, y: size.height)
         }
+        c.scaleBy(x: 1.0, y: -1.0)
         
-        UIGraphicsPushContext(context!)
+        UIGraphicsPushContext(c)
         self.draw(in: CGRect(x: 0, y: 0, width: originalSize.width, height: originalSize.height))
         UIGraphicsPopContext()
-        CVPixelBufferUnlockBaseAddress(pixelBuffer!, CVPixelBufferLockFlags(rawValue: 0))
-        return pixelBuffer
+        CVPixelBufferUnlockBaseAddress(buff!, CVPixelBufferLockFlags(rawValue: 0))
+        return buff
     }
 }
