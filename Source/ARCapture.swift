@@ -51,13 +51,17 @@ open class ARCapture {
     var status: Status = .ready
     private var audioPermissions: AudioPermissions = .unknown
     private var recordAudio: Bool = true
+    private var isPrepare: Bool = false
+    private var prepareCallback: ((Bool)->())? = nil
     
     private var assetCreator: ARAssetCreator?
+    private var depthAssetCreator: FileHandle?
     private var frameGenerator: ARFrameGenerator?
     private var needToPause: Bool = false
     private var lastPauseTime: CMTime?
     private var summaryDelay: CMTime?
     private var videoUrl: URL?
+    private var depthUrl: URL?
     
     public init?(view: ARSCNView) {
         self.view = view
@@ -84,11 +88,21 @@ open class ARCapture {
     
     // MARK: - API
     
+    public func prepare(_ complete: @escaping ((Bool)->())) {
+        isPrepare = true
+        prepareCallback = complete
+        start()
+    }
+    
     /// Start recording
     /// - Parameter captureType: the capture type. Different values make sence for landscape orientation of the device. In most cases either rendering is incorrect (due to iOS issue) or UX is not good (due to hacks). Find quality is with `.imageCapture`. For portrait orientation use `.renderOriginal`.
-    public func start(captureType: ARFrameGenerator.CaptureType? = nil) {
+    public func start(
+        captureType: ARFrameGenerator.CaptureType? = nil,
+        captureDepth: ARFrameGenerator.CaptureDepth? = nil
+    ) {
         let type: ARFrameGenerator.CaptureType = captureType ?? (ARCapture.Orientation.isPortrait ? .renderOriginal : .imageCapture)
-        frameGenerator = ARFrameGenerator(captureType: type)
+        let depth: ARFrameGenerator.CaptureDepth = captureDepth ?? ARFrameGenerator.CaptureDepth.no
+        frameGenerator = ARFrameGenerator(captureType: type, captureDepth: depth)
 //        if let currentFrame = view.session.currentFrame {
             
 //            // Match clipping
@@ -116,30 +130,49 @@ open class ARCapture {
 //            renderer.pointOfView?.simdTransform = currentFrame.camera.viewMatrix(for: .landscapeLeft).inverse
 //        }
         
-        tryEnableAudio { [weak self] in
-            self?.status = .recording
-            self?.displayTimer.isPaused = false
+        if (recordAudio) {
+            tryEnableAudio { [weak self] in
+                self?.status = .recording
+                self?.displayTimer.isPaused = false
+            }
+        } else {
+            self.status = .recording
+            self.displayTimer.isPaused = false
         }
     }
     
     /// Stop and add video to library if `complete` is provided.
     /// - Parameter complete: the callback used to notify when video is added to Photos. If nil, then video will not be created.
-    public func stop(_ complete: ((Bool)->())? = nil) {
+    public func stop(_ complete: ((Bool, URL?)->())? = nil) {
         self.status = .ready
         queue.sync { [weak self] in
             self?.lastPauseTime = nil
             self?.assetCreator?.stop { [weak self] in
                 if let url = self?.videoUrl {
                     if let complete = complete {
-                        self?.addVideoToLibrary(from: url, completed: complete)
-                    }
-                    else {
+                        if let depthUrl = self?.depthUrl {
+                            self?.addVideoToLibrary(from: url, depthUrl: depthUrl, completed: complete)
+                        } else {
+                            self?.addVideoToLibrary(from: url, depthUrl: nil, completed: complete)
+                        }
+                    } else {
                         try? FileManager.default.removeItem(at: url)
-                        complete?(false)
+                        if let depthUrl = self?.depthUrl {
+                            try? FileManager.default.removeItem(at: depthUrl)
+                        }
+                        complete?(false, nil)
+                        if let prepareCallback = self?.prepareCallback, self?.isPrepare == true {
+                            prepareCallback(false)
+                        }
                     }
                 } else {
-                    complete?(false)
+                    complete?(false, nil)
+                    if let prepareCallback = self?.prepareCallback, self?.isPrepare == true {
+                        prepareCallback(false)
+                    }
                 }
+                self?.isPrepare = false
+                self?.prepareCallback = nil
                 self?.displayTimer.isPaused = true
                 self?.assetCreator = nil
                 self?.frameGenerator = nil
@@ -147,12 +180,38 @@ open class ARCapture {
         }
     }
     
+    public func stopPrepare() {
+        self.status = .ready
+        self.lastPauseTime = nil
+        self.assetCreator?.stop { [weak self] in
+            if let url = self?.videoUrl {
+                try? FileManager.default.removeItem(at: url)
+                if let depthUrl = self?.depthUrl {
+                    try? FileManager.default.removeItem(at: depthUrl)
+                }
+                if let prepareCallback = self?.prepareCallback, self?.isPrepare == true {
+                    prepareCallback(true)
+                }
+            } else {
+                if let prepareCallback = self?.prepareCallback, self?.isPrepare == true {
+                    prepareCallback(false)
+                }
+            }
+            self?.isPrepare = false
+            self?.prepareCallback = nil
+            self?.displayTimer.isPaused = true
+            self?.assetCreator = nil
+            self?.frameGenerator = nil
+        }
+    }
+    
     /// Start/stop external frame processor (implementing delegate protocol)
     /// - Parameter start: true - start, false - stop
-    public func frameProcessor(start: Bool, captureType: ARFrameGenerator.CaptureType? = nil) {
+    public func frameProcessor(start: Bool, captureType: ARFrameGenerator.CaptureType? = nil, captureDepth: ARFrameGenerator.CaptureDepth? = nil) {
         if start {
             let type: ARFrameGenerator.CaptureType = captureType ?? (ARCapture.Orientation.isPortrait ? .renderOriginal : .imageCapture)
-            frameGenerator = ARFrameGenerator(captureType: type)
+            let depth: ARFrameGenerator.CaptureDepth = captureDepth ?? ARFrameGenerator.CaptureDepth.no
+            frameGenerator = ARFrameGenerator(captureType: type, captureDepth: depth)
             self.status = .recording
             self.displayTimer.isPaused = false
         }
@@ -164,9 +223,10 @@ open class ARCapture {
     }
     
     /// Capture image
-    public func image(captureType: ARFrameGenerator.CaptureType? = nil) -> UIImage? {
+    public func image(captureType: ARFrameGenerator.CaptureType? = nil, captureDepth: ARFrameGenerator.CaptureDepth? = nil) -> UIImage? {
         let type: ARFrameGenerator.CaptureType = captureType ?? (ARCapture.Orientation.isPortrait ? .renderOriginal : .imageCapture)
-        let frameGenerator = ARFrameGenerator(captureType: type)
+        let depth: ARFrameGenerator.CaptureDepth = captureDepth ?? ARFrameGenerator.CaptureDepth.no
+        let frameGenerator = ARFrameGenerator(captureType: type, captureDepth: depth)
         guard let frame = frameGenerator.getFrame(from: view, renderer: renderer, time: CACurrentMediaTime()), let buffer = frame.1 else { return nil }
         return UIImage(ciImage: CIImage(cvPixelBuffer: buffer))
     }
@@ -176,12 +236,12 @@ open class ARCapture {
     /// - Parameters:
     ///   - url: the local file URL
     ///   - completed: the callback
-    public func addVideoToLibrary(from url: URL, completed: @escaping (Bool)->()) {
+    public func addVideoToLibrary(from url: URL, depthUrl: URL?, completed: @escaping (Bool, URL?)->()) {
         DispatchQueue.global(qos: .background).async {
             let status = PHPhotoLibrary.authorizationStatus()
             if status == .notDetermined {
                 PHPhotoLibrary.requestAuthorization() { [weak self] status in
-                    self?.addVideoToLibrary(from: url, completed: completed)
+                    self?.addVideoToLibrary(from: url, depthUrl: depthUrl, completed: completed)
                 }
             } else if status == .authorized {
                 PHPhotoLibrary.shared().performChanges({
@@ -196,10 +256,10 @@ open class ARCapture {
                     catch {
                         print("ERROR: \(error)")
                     }
-                    completed(error == nil)
+                    completed(error == nil, depthUrl ?? nil)
                 }
             } else {
-                completed(false)
+                completed(false, nil)
             }
         }
     }
@@ -219,11 +279,35 @@ open class ARCapture {
         }
     }
     
+    private func saveDepthData(frameNum: Int, frameDepth: [Float]) {
+        if let depthAssetCreator = depthAssetCreator {
+            let depthData = Data(bytes: frameDepth, count: frameDepth.count * MemoryLayout<Float>.stride)
+            var frame: Int32 = Int32(frameNum)
+            var frameNumData = Data(bytes: &frame, count: MemoryLayout.size(ofValue: frame))
+            depthAssetCreator.write(frameNumData)
+            depthAssetCreator.write(depthData)
+        } else {
+            let date = Date()
+            depthUrl = URL.tmpDepthUrl(date: date)
+            if let depthUrl = depthUrl {
+                do {
+                    let success = FileManager.default.createFile(atPath: depthUrl.path, contents: nil, attributes:nil)
+                    if (success) {
+                        depthAssetCreator = try FileHandle(forWritingTo: depthUrl)
+                    }
+                }
+                catch {
+                    print("ERROR: \(error)")
+                }
+            }
+        }
+    }
+    
     /// Process frame
-    @objc func processFrame() {
+    @objc private func processFrame() {
         guard status.isCapturing() else { return }
         let mediaTime = CACurrentMediaTime()
-        guard let frame = frameGenerator?.getFrame(from: view, renderer: renderer, time: mediaTime), let buffer = frame.1 else { return }
+        guard let frame = frameGenerator?.getFrame(from: view, renderer: renderer, time: mediaTime, depthComplete: saveDepthData), let buffer = frame.1 else { return }
         queue.sync { [weak self] in
             guard self != nil else { return }
             var time: CMTime { return CMTime(seconds: mediaTime, preferredTimescale: 1000000) }
@@ -231,7 +315,7 @@ open class ARCapture {
             self?.delegate?.frame(frame: frame)
         
             //frame writing
-            if status == .recording && !self!.needToPause {
+            if (status == .recording && !self!.needToPause) {
                 if let assetCreator = self?.assetCreator {
                     
                     assetCreator.append(buffer: buffer, with: getFrameTime(time: time))
@@ -244,8 +328,16 @@ open class ARCapture {
                         }
                         print(self!.videoUrl!)
                     }
+                    
+                    if (isPrepare) {
+                        let frameCount = frame.3
+                        if (frameCount > 3) {
+                            self?.stopPrepare()
+                        }
+                    }
                 } else {
-                    let url = URL.tmpVideoUrl()
+                    let date = Date()
+                    let url = URL.tmpVideoUrl(date: date)
                     self?.videoUrl = url
                     
                     let size = frame.2
@@ -311,9 +403,15 @@ open class ARCapture {
 extension URL {
     
     /// Temporary video path
-    static func tmpVideoUrl() -> URL {
+    static func tmpVideoUrl(date: Date) -> URL {
         let parentPath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true).first!
-        return URL(fileURLWithPath: "\(parentPath)/\(Date.isoFormatter.string(from: Date())).mp4", isDirectory: false)
+        return URL(fileURLWithPath: "\(parentPath)/\(Date.isoFormatter.string(from: date)).mp4", isDirectory: false)
+    }
+    
+    /// Temporary depth path
+    static func tmpDepthUrl(date: Date) -> URL {
+        let parentPath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true).first!
+        return URL(fileURLWithPath: "\(parentPath)/\(Date.isoFormatter.string(from: date)).bin", isDirectory: false)
     }
 }
 

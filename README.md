@@ -62,6 +62,10 @@ override func viewDidLoad() {
 /// "Record" button action handler
 @IBAction func recordAction(_ sender: UIButton) {
     capture?.start()
+    // or
+    capture?.start(captureType: ARFrameGenerator.CaptureType.renderOriginal, captureDepth: ARFrameGenerator.CaptureDepth.default)
+    // or
+    capture?.start(captureType: ARFrameGenerator.CaptureType.renderOriginal, captureDepth: ARFrameGenerator.CaptureDepth.smooth)
 }
 
 /// "Stop" button action handler

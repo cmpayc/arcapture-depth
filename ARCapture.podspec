@@ -1,7 +1,7 @@
 Pod::Spec.new do |s|
   s.name        = "ARCapture"
-  s.version     = "0.1.2"
-  s.summary     = "Utility allows to capture videos from ARKit scene and export to Photos app."
+  s.version     = "0.2.1"
+  s.summary     = "Utility allows to capture videos from ARKit scene and export to Photos app with LiDAR depth data"
   s.homepage    = "https://gitlab.com/seriyvolk83/ARCapture"
   s.license     = { :type => "MIT" }
   s.authors     = { "seriyvolk83" => "volk@frgroup.ru" }

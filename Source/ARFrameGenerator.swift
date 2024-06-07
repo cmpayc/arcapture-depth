@@ -8,7 +8,7 @@
 import Foundation
 import ARKit
 
-public typealias ARCaptureFrame = (CVPixelBuffer, CVImageBuffer?, CGSize)
+public typealias ARCaptureFrame = (CVPixelBuffer, CVImageBuffer?, CGSize, Int)
 
 public class ARFrameGenerator {
     
@@ -19,20 +19,71 @@ public class ARFrameGenerator {
              renderOriginal // uses correct frame transform                              (good UX, worst video)
     }
     
-    let captureType: CaptureType
+    public enum CaptureDepth: Int {
+        case no,
+             yes,
+             smooth
+    }
     
-    init(captureType: CaptureType) {
+    let captureType: CaptureType
+    let captureDepth: CaptureDepth
+
+    var isCapturingDepth = false
+    
+    private var frameNum = 1
+    private var processing = false
+    private var canCaptureDepth = false
+    
+    init(captureType: CaptureType, captureDepth: CaptureDepth) {
         self.captureType = captureType
+        self.captureDepth = captureDepth
+        self.frameNum = 1
+        self.processing = false
+        if #available(iOS 14.0, *) {
+            self.canCaptureDepth = ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
+        }
         if captureType == .renderWithDeviceRotation {
             UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation")
         }
     }
     
     public let queue = DispatchQueue(label: "ru.frgroup.volk.ARFrameGenerator", attributes: .concurrent)
+    public let queue2 = DispatchQueue(label: "ru.frgroup.volk.ARFrameGenerator2", attributes: .concurrent)
     
-    public func getFrame(from view: ARSCNView, renderer: SCNRenderer!, time: CFTimeInterval) -> ARCaptureFrame? {
-        guard let currentFrame = view.session.currentFrame else { return nil }
+    public func getFrame(from view: ARSCNView, renderer: SCNRenderer!, time: CFTimeInterval, depthComplete: ((Int, [Float])->())? = nil) -> ARCaptureFrame? {
+        if (processing) {
+            return nil
+        }
+        guard let currentFrame = view.session.currentFrame else {
+            return nil
+        }
+        processing = true
+        let thisFrameNum = frameNum
         let capturedImage = currentFrame.capturedImage
+        
+        if
+            #available(iOS 14.0, *),
+            let depthComplete = depthComplete,
+            self.canCaptureDepth && (self.captureDepth == .yes || self.captureDepth == .smooth) && !isCapturingDepth
+        {
+            if (self.captureDepth == .smooth) {
+                queue2.async {
+                    self.isCapturingDepth = true
+                    let sceneDepth = currentFrame.smoothedSceneDepth
+                    let capturedDepth = sceneDepth?.depthMap.toFlatArray() ?? [Float](repeating: 0.0, count: 49152)
+                    depthComplete(thisFrameNum, capturedDepth)
+                    self.isCapturingDepth = false
+                }
+            } else if (self.captureDepth == .yes) {
+                queue2.async {
+                    self.isCapturingDepth = true
+                    let sceneDepth = currentFrame.sceneDepth
+                    let capturedDepth = sceneDepth?.depthMap.toFlatArray() ?? [Float](repeating: 0.0, count: 49152)
+                    depthComplete(thisFrameNum, capturedDepth)
+                    self.isCapturingDepth = false
+                }
+            }
+        }
         
         /// the image used for the video frame
         var frame: UIImage?
@@ -84,7 +135,10 @@ public class ARFrameGenerator {
                 //print("size: \(size) frame.size=\(frame?.size)")
             }
         }
-        return (capturedImage, frame?.getBuffer(angle: angle, originalSize: originalSize), originalSize)
+        processing = false
+        frameNum += 1
+
+        return (capturedImage, frame?.getBuffer(angle: angle, originalSize: originalSize), originalSize, thisFrameNum)
     }
 }
 
@@ -132,3 +186,108 @@ extension UIImage {
         return buff
     }
 }
+
+extension CVPixelBuffer {
+    // Requires CVPixelBufferLockBaseAddress(_:_:) first
+    var data: UnsafeRawBufferPointer? {
+        let size = CVPixelBufferGetDataSize(self)
+        return .init(start: CVPixelBufferGetBaseAddress(self), count: size) }
+    var pixelSize: simd_int2 { simd_int2(Int32(width), Int32(height)) }
+    var width: Int { CVPixelBufferGetWidth(self) }
+    var height: Int { CVPixelBufferGetHeight(self) }
+
+    func sample(location: simd_float2) -> simd_float4? {
+        let pixelSize = self.pixelSize
+        guard pixelSize.x > 0 && pixelSize.y > 0 else { return nil }
+        guard CVPixelBufferLockBaseAddress(self, .readOnly) == noErr else { return nil }
+        guard let data = data else { return nil }
+        defer { CVPixelBufferUnlockBaseAddress(self, .readOnly) }
+        let pix = location * simd_float2(pixelSize)
+        let clamped = clamp(simd_int2(pix), min: .zero, max: pixelSize &- simd_int2(1,1))
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(self)
+        let row = Int(clamped.y)
+        let column = Int(clamped.x)
+        let rowPtr = data.baseAddress! + row * bytesPerRow
+        switch CVPixelBufferGetPixelFormatType(self) {
+        case kCVPixelFormatType_DepthFloat32:
+            // Bind the row to the right type
+            let typed = rowPtr.assumingMemoryBound(to: Float.self)
+            return .init(typed[column], 0, 0, 0)
+        case kCVPixelFormatType_32BGRA:
+            // Bind the row to the right type
+            let typed = rowPtr.assumingMemoryBound(to: UInt8.self)
+            return .init(Float(typed[column]) / Float(UInt8.max), 0, 0, 0)
+        default:
+            return nil
+        }
+    }
+    
+    func toFlatArray() -> [Float] {
+        var depthArray = [Float]()
+        let pixelSize = self.pixelSize
+        guard pixelSize.x > 0 && pixelSize.y > 0 else { return depthArray }
+        guard CVPixelBufferLockBaseAddress(self, .readOnly) == noErr else { return depthArray }
+        guard let data = data else { return depthArray }
+        defer { CVPixelBufferUnlockBaseAddress(self, .readOnly) }
+        for y in stride(from: 1, to: pixelSize.y + 1, by: 1) {
+            for x in stride(from: 1, to: pixelSize.x + 1, by: 1) {
+                let pix = simd_float2(Float(x), Float(y))
+                let clamped = clamp(simd_int2(pix), min: .zero, max: pixelSize &- simd_int2(1,1))
+                let bytesPerRow = CVPixelBufferGetBytesPerRow(self)
+                let row = Int(clamped.y)
+                let column = Int(clamped.x)
+                let rowPtr = data.baseAddress! + row * bytesPerRow
+                switch CVPixelBufferGetPixelFormatType(self) {
+                case kCVPixelFormatType_DepthFloat32:
+                    // Bind the row to the right type
+                    let typed = rowPtr.assumingMemoryBound(to: Float.self)
+                    depthArray.append(typed[column])
+                case kCVPixelFormatType_32BGRA:
+                    // Bind the row to the right type
+                    let typed = rowPtr.assumingMemoryBound(to: UInt8.self)
+                    depthArray.append(Float(typed[column]) / Float(UInt8.max))
+                default:
+                    depthArray.append(0)
+                }
+            }
+        }
+        
+        return depthArray
+    }
+    
+    func toArray() -> [[Float]] {
+        var depthArray = [[Float]]()
+        let pixelSize = self.pixelSize
+        guard pixelSize.x > 0 && pixelSize.y > 0 else { return depthArray }
+        guard CVPixelBufferLockBaseAddress(self, .readOnly) == noErr else { return depthArray }
+        guard let data = data else { return depthArray }
+        defer { CVPixelBufferUnlockBaseAddress(self, .readOnly) }
+        for y in stride(from: 1, to: pixelSize.y + 1, by: 1) {
+            var depthArrayLine = [Float]()
+            for x in stride(from: 1, to: pixelSize.x + 1, by: 1) {
+                let pix = simd_float2(Float(x), Float(y))
+                let clamped = clamp(simd_int2(pix), min: .zero, max: pixelSize &- simd_int2(1,1))
+                let bytesPerRow = CVPixelBufferGetBytesPerRow(self)
+                let row = Int(clamped.y)
+                let column = Int(clamped.x)
+                let rowPtr = data.baseAddress! + row * bytesPerRow
+                switch CVPixelBufferGetPixelFormatType(self) {
+                case kCVPixelFormatType_DepthFloat32:
+                    // Bind the row to the right type
+                    let typed = rowPtr.assumingMemoryBound(to: Float.self)
+                    depthArrayLine.append(typed[column])
+                case kCVPixelFormatType_32BGRA:
+                    // Bind the row to the right type
+                    let typed = rowPtr.assumingMemoryBound(to: UInt8.self)
+                    depthArrayLine.append(Float(typed[column]) / Float(UInt8.max))
+                default:
+                    depthArrayLine.append(0)
+                }
+            }
+            depthArray.append(depthArrayLine)
+        }
+        
+        return depthArray
+    }
+}
+
