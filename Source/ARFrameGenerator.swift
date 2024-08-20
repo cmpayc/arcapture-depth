@@ -50,7 +50,7 @@ public class ARFrameGenerator {
     public let queue = DispatchQueue(label: "ru.frgroup.volk.ARFrameGenerator", attributes: .concurrent)
     public let queue2 = DispatchQueue(label: "ru.frgroup.volk.ARFrameGenerator2", attributes: .concurrent)
     
-    public func getFrame(from view: ARSCNView, renderer: SCNRenderer!, time: CFTimeInterval, depthComplete: ((Int, [Float])->())? = nil) -> ARCaptureFrame? {
+    public func getFrame(from view: ARSCNView, renderer: SCNRenderer!, time: CFTimeInterval, depthComplete: ((Int, [Float], [Float], [Float])->())? = nil) -> ARCaptureFrame? {
         if (processing) {
             return nil
         }
