@@ -113,8 +113,10 @@ public class ARFrameGenerator {
         var frame: UIImage?
         //        var width = CVPixelBufferGetWidth(capturedImage)
         //        var height = CVPixelBufferGetHeight(capturedImage)
-        var width = captureType == .imageCapture ? view.bounds.width : view.currentViewport.width
-        var height = captureType == .imageCapture ? view.bounds.height : view.currentViewport.height
+        // var width = captureType == .imageCapture ? view.bounds.width : view.currentViewport.width
+        // var height = captureType == .imageCapture ? view.bounds.height : view.currentViewport.height
+        var width = view.bounds.width
+        var height = view.bounds.height
         let originalSize = CGSize(width: width, height: height)
         
         // Calculate angle

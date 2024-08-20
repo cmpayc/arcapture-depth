@@ -48,9 +48,9 @@ class ARAssetCreator: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
             })
         }
         var effectiveSize = size
-        if size.height < size.width && captureType == .renderWithDeviceRotation {
-            effectiveSize = CGSize(width: size.height, height: size.width)
-        }
+        //if size.height < size.width && captureType == .renderWithDeviceRotation {
+        //    effectiveSize = CGSize(width: size.height, height: size.width)
+        //}
         videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264 as AnyObject,
             AVVideoWidthKey: Int(effectiveSize.width) as AnyObject,
