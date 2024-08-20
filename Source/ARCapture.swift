@@ -279,12 +279,18 @@ open class ARCapture {
         }
     }
     
-    private func saveDepthData(frameNum: Int, frameDepth: [Float]) {
+    private func saveDepthData(frameNum: Int, quaternion: [Float], intrinsicsMatrix: [Float], frameDepth: [Float]) {
         if let depthAssetCreator = depthAssetCreator {
+            let quaternionData = Data(bytes: quaternion, count: quaternion.count * MemoryLayout<Float>.stride)
+            let intrinsicsMatrixData = Data(bytes: intrinsicsMatrix, count: intrinsicsMatrix.count * MemoryLayout<Float>.stride)
             let depthData = Data(bytes: frameDepth, count: frameDepth.count * MemoryLayout<Float>.stride)
             var frame: Int32 = Int32(frameNum)
+            
+            
             var frameNumData = Data(bytes: &frame, count: MemoryLayout.size(ofValue: frame))
             depthAssetCreator.write(frameNumData)
+            depthAssetCreator.write(quaternionData)
+            depthAssetCreator.write(intrinsicsMatrixData)
             depthAssetCreator.write(depthData)
         } else {
             let date = Date()

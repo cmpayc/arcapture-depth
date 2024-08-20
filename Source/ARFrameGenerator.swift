@@ -71,7 +71,19 @@ public class ARFrameGenerator {
                     self.isCapturingDepth = true
                     let sceneDepth = currentFrame.smoothedSceneDepth
                     let capturedDepth = sceneDepth?.depthMap.toFlatArray() ?? [Float](repeating: 0.0, count: 49152)
-                    depthComplete(thisFrameNum, capturedDepth)
+                    
+                    let trans = currentFrame.camera.transform
+                    let quat = simd_quaternion(trans)
+                    let camMat = currentFrame.camera.intrinsics
+                    
+                    let quaternion: [Float] = [quat.vector.x, quat.vector.y, quat.vector.z, quat.vector.w]
+                    let intrinsicsMatrix: [Float] = [
+                        camMat.columns.0.x, camMat.columns.0.y, camMat.columns.0.z,
+                        camMat.columns.1.x, camMat.columns.1.y, camMat.columns.1.z,
+                        camMat.columns.2.x, camMat.columns.2.y, camMat.columns.2.z,
+                    ]
+                    
+                    depthComplete(thisFrameNum, quaternion, intrinsicsMatrix, capturedDepth)
                     self.isCapturingDepth = false
                 }
             } else if (self.captureDepth == .yes) {
@@ -79,7 +91,19 @@ public class ARFrameGenerator {
                     self.isCapturingDepth = true
                     let sceneDepth = currentFrame.sceneDepth
                     let capturedDepth = sceneDepth?.depthMap.toFlatArray() ?? [Float](repeating: 0.0, count: 49152)
-                    depthComplete(thisFrameNum, capturedDepth)
+                    
+                    let trans = currentFrame.camera.transform
+                    let quat = simd_quaternion(trans)
+                    let camMat = currentFrame.camera.intrinsics
+                    
+                    let quaternion: [Float] = [quat.vector.x, quat.vector.y, quat.vector.z, quat.vector.w]
+                    let intrinsicsMatrix: [Float] = [
+                        camMat.columns.0.x, camMat.columns.0.y, camMat.columns.0.z,
+                        camMat.columns.1.x, camMat.columns.1.y, camMat.columns.1.z,
+                        camMat.columns.2.x, camMat.columns.2.y, camMat.columns.2.z,
+                    ]
+                    
+                    depthComplete(thisFrameNum, quaternion, intrinsicsMatrix, capturedDepth)
                     self.isCapturingDepth = false
                 }
             }
