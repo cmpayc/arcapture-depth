@@ -3,6 +3,7 @@
 //  ARCapture framework
 //
 //  Created by Volkov Alexander on 6/6/21.
+//  Modified by Sergei Kazakov on 21.08.24.
 //
 
 import Foundation
@@ -50,7 +51,7 @@ open class ARCapture {
     
     var status: Status = .ready
     private var audioPermissions: AudioPermissions = .unknown
-    private var recordAudio: Bool = true
+    private var recordAudio: Bool = false
     private var isPrepare: Bool = false
     private var prepareCallback: ((Bool)->())? = nil
     
@@ -77,7 +78,8 @@ open class ARCapture {
         renderer.scene = view.scene
         
         displayTimer = CADisplayLink(target: self, selector: #selector(processFrame))
-        displayTimer.preferredFramesPerSecond = 60
+        //displayTimer.preferredFramesPerSecond = 60
+        displayTimer.preferredFramesPerSecond = 30
         displayTimer.add(to: .main, forMode: .common)
         
         
@@ -227,7 +229,9 @@ open class ARCapture {
         let type: ARFrameGenerator.CaptureType = captureType ?? (ARCapture.Orientation.isPortrait ? .renderOriginal : .imageCapture)
         let depth: ARFrameGenerator.CaptureDepth = captureDepth ?? ARFrameGenerator.CaptureDepth.no
         let frameGenerator = ARFrameGenerator(captureType: type, captureDepth: depth)
-        guard let frame = frameGenerator.getFrame(from: view, renderer: renderer, time: CACurrentMediaTime()), let buffer = frame.1 else { return nil }
+        //guard let frame = frameGenerator.getFrame(from: view, renderer: renderer, time: CACurrentMediaTime()), let buffer = frame.1 else { return nil }
+        guard let frame = frameGenerator.getFrame(from: view, renderer: renderer, time: CACurrentMediaTime()) else { return nil }
+        let buffer = frame.1
         return UIImage(ciImage: CIImage(cvPixelBuffer: buffer))
     }
     
@@ -313,7 +317,9 @@ open class ARCapture {
     @objc private func processFrame() {
         guard status.isCapturing() else { return }
         let mediaTime = CACurrentMediaTime()
-        guard let frame = frameGenerator?.getFrame(from: view, renderer: renderer, time: mediaTime, depthComplete: saveDepthData), let buffer = frame.1 else { return }
+        //guard let frame = frameGenerator?.getFrame(from: view, renderer: renderer, time: mediaTime, depthComplete: saveDepthData), let buffer = frame.1 else { return }
+        guard let frame = frameGenerator?.getFrame(from: view, renderer: renderer, time: mediaTime, depthComplete: saveDepthData) else { return }
+        let buffer = frame.1
         queue.sync { [weak self] in
             guard self != nil else { return }
             var time: CMTime { return CMTime(seconds: mediaTime, preferredTimescale: 1000000) }

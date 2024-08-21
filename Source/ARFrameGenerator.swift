@@ -3,12 +3,14 @@
 //  ARCapture framework
 //
 //  Created by Volkov Alexander on 6/6/21.
+//  Modified by Sergei Kazakov on 21.08.24.
 //
 
 import Foundation
 import ARKit
 
-public typealias ARCaptureFrame = (CVPixelBuffer, CVImageBuffer?, CGSize, Int)
+// public typealias ARCaptureFrame = (CVPixelBuffer, CVImageBuffer?, CGSize, Int)
+public typealias ARCaptureFrame = (Bool, CVPixelBuffer, CGSize, Int)
 
 public class ARFrameGenerator {
     
@@ -33,6 +35,7 @@ public class ARFrameGenerator {
     private var frameNum = 1
     private var processing = false
     private var canCaptureDepth = false
+    private var coreImageContext: CIContext
     
     init(captureType: CaptureType, captureDepth: CaptureDepth) {
         self.captureType = captureType
@@ -44,6 +47,12 @@ public class ARFrameGenerator {
         }
         if captureType == .renderWithDeviceRotation {
             UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation")
+        }
+        
+        if let metalDevice = MTLCreateSystemDefaultDevice() {
+            self.coreImageContext = CIContext(mtlDevice: metalDevice)
+        } else {
+            self.coreImageContext = CIContext(options: nil)
         }
     }
     
@@ -70,40 +79,20 @@ public class ARFrameGenerator {
                 queue2.async {
                     self.isCapturingDepth = true
                     let sceneDepth = currentFrame.smoothedSceneDepth
-                    let capturedDepth = sceneDepth?.depthMap.toFlatArray() ?? [Float](repeating: 0.0, count: 49152)
                     
-                    let trans = currentFrame.camera.transform
-                    let quat = simd_quaternion(trans)
-                    let camMat = currentFrame.camera.intrinsics
+                    let (capturedDepth, arPose, intrinsicsMatrix) = self.getARKitData(currentFrame: currentFrame, sceneDepth: sceneDepth, isPortrait: ARCapture.Orientation.isPortrait, isLandscapeRight: ARCapture.Orientation.isLandscapeRight)
                     
-                    let quaternion: [Float] = [quat.vector.x, quat.vector.y, quat.vector.z, quat.vector.w]
-                    let intrinsicsMatrix: [Float] = [
-                        camMat.columns.0.x, camMat.columns.0.y, camMat.columns.0.z,
-                        camMat.columns.1.x, camMat.columns.1.y, camMat.columns.1.z,
-                        camMat.columns.2.x, camMat.columns.2.y, camMat.columns.2.z,
-                    ]
-                    
-                    depthComplete(thisFrameNum, quaternion, intrinsicsMatrix, capturedDepth)
+                    depthComplete(thisFrameNum, arPose, intrinsicsMatrix, capturedDepth)
                     self.isCapturingDepth = false
                 }
             } else if (self.captureDepth == .yes) {
                 queue2.async {
                     self.isCapturingDepth = true
                     let sceneDepth = currentFrame.sceneDepth
-                    let capturedDepth = sceneDepth?.depthMap.toFlatArray() ?? [Float](repeating: 0.0, count: 49152)
                     
-                    let trans = currentFrame.camera.transform
-                    let quat = simd_quaternion(trans)
-                    let camMat = currentFrame.camera.intrinsics
+                    let (capturedDepth, arPose, intrinsicsMatrix) = self.getARKitData(currentFrame: currentFrame, sceneDepth: sceneDepth, isPortrait: ARCapture.Orientation.isPortrait, isLandscapeRight: ARCapture.Orientation.isLandscapeRight)
                     
-                    let quaternion: [Float] = [quat.vector.x, quat.vector.y, quat.vector.z, quat.vector.w]
-                    let intrinsicsMatrix: [Float] = [
-                        camMat.columns.0.x, camMat.columns.0.y, camMat.columns.0.z,
-                        camMat.columns.1.x, camMat.columns.1.y, camMat.columns.1.z,
-                        camMat.columns.2.x, camMat.columns.2.y, camMat.columns.2.z,
-                    ]
-                    
-                    depthComplete(thisFrameNum, quaternion, intrinsicsMatrix, capturedDepth)
+                    depthComplete(thisFrameNum, arPose, intrinsicsMatrix, capturedDepth)
                     self.isCapturingDepth = false
                 }
             }
@@ -113,10 +102,12 @@ public class ARFrameGenerator {
         var frame: UIImage?
         //        var width = CVPixelBufferGetWidth(capturedImage)
         //        var height = CVPixelBufferGetHeight(capturedImage)
-        // var width = captureType == .imageCapture ? view.bounds.width : view.currentViewport.width
-        // var height = captureType == .imageCapture ? view.bounds.height : view.currentViewport.height
-        var width = view.bounds.width
-        var height = view.bounds.height
+        //var width = captureType == .imageCapture ? view.bounds.width : view.currentViewport.width
+        //var height = captureType == .imageCapture ? view.bounds.height : view.currentViewport.height
+        //var width = view.bounds.width
+        //var height = view.bounds.height
+        var width = capturedImage.width
+        var height = capturedImage.height
         let originalSize = CGSize(width: width, height: height)
         
         // Calculate angle
@@ -137,6 +128,7 @@ public class ARFrameGenerator {
         }
         let size = CGSize(width: width, height: height)
         
+        /* We don't need to record an ARKit frame
         if captureType == .imageCapture {
             frame = UIImage.imageFromView(view: view)
         }
@@ -161,10 +153,47 @@ public class ARFrameGenerator {
                 //print("size: \(size) frame.size=\(frame?.size)")
             }
         }
+        */
         processing = false
         frameNum += 1
 
-        return (capturedImage, frame?.getBuffer(angle: angle, originalSize: originalSize), originalSize, thisFrameNum)
+        //return (capturedImage, frame?.getBuffer(angle: angle, originalSize: originalSize), originalSize, thisFrameNum)
+        var pixelBuffer: CVPixelBuffer?
+        if (ARCapture.Orientation.isPortrait) {
+            pixelBuffer = capturedImage.rotate(side: .right, coreImageContext: self.coreImageContext)
+        } else if (ARCapture.Orientation.isLandscapeRight) {
+            pixelBuffer = capturedImage.rotate(side: .right, coreImageContext: self.coreImageContext)
+            pixelBuffer = pixelBuffer!.rotate(side: .right, coreImageContext: self.coreImageContext)
+        } else {
+            pixelBuffer = capturedImage
+        }
+        return (true, pixelBuffer!, originalSize, thisFrameNum)
+    }
+    
+    @available(iOS 14.0, *)
+    private func getARKitData(currentFrame: ARFrame, sceneDepth: ARDepthData?, isPortrait: Bool, isLandscapeRight: Bool) -> ([Float], [Float], [Float]) {
+        let capturedDepth: [Float]
+        if (sceneDepth != nil) {
+            capturedDepth = sceneDepth!.depthMap.toFlatArray(isPortrait: isPortrait, isLandscapeRight: isLandscapeRight) ?? [Float](repeating: 0.0, count: 49152)
+        } else {
+            capturedDepth = [Float](repeating: 0.0, count: 49152)
+        }
+        
+        let trans = currentFrame.camera.transform
+        let quat = simd_quaternion(trans)
+        let camMat = currentFrame.camera.intrinsics
+        
+        let arPose: [Float] = [
+            trans.columns.3.x, trans.columns.3.y, trans.columns.3.z,
+            quat.vector.x, quat.vector.y, quat.vector.z, quat.vector.w
+        ]
+        let intrinsicsMatrix: [Float] = [
+            camMat.columns.0.x, camMat.columns.0.y, camMat.columns.0.z,
+            camMat.columns.1.x, camMat.columns.1.y, camMat.columns.1.z,
+            camMat.columns.2.x, camMat.columns.2.y, camMat.columns.2.z,
+        ]
+        
+        return (capturedDepth, arPose, intrinsicsMatrix)
     }
 }
 
@@ -248,16 +277,37 @@ extension CVPixelBuffer {
         }
     }
     
-    func toFlatArray() -> [Float] {
+    func toFlatArray(isPortrait: Bool, isLandscapeRight: Bool) -> [Float] {
         var depthArray = [Float]()
         let pixelSize = self.pixelSize
         guard pixelSize.x > 0 && pixelSize.y > 0 else { return depthArray }
         guard CVPixelBufferLockBaseAddress(self, .readOnly) == noErr else { return depthArray }
         guard let data = data else { return depthArray }
         defer { CVPixelBufferUnlockBaseAddress(self, .readOnly) }
-        for y in stride(from: 1, to: pixelSize.y + 1, by: 1) {
-            for x in stride(from: 1, to: pixelSize.x + 1, by: 1) {
-                let pix = simd_float2(Float(x), Float(y))
+        var fromLeft: Int32 = 1
+        var toLeft: Int32 = pixelSize.x + 1
+        var fromTop: Int32 = 1
+        var toTop: Int32 = pixelSize.y + 1
+        var byTop = 1
+        var byLeft = 1
+        if (isPortrait) {
+            fromLeft = pixelSize.y + 1
+            toLeft = 1
+            fromTop = 1
+            toTop = pixelSize.x + 1
+            byLeft = -1
+        } else if (isLandscapeRight) {
+            fromLeft = pixelSize.x + 1
+            toLeft = 1
+            fromTop = pixelSize.y + 1
+            toTop = 1
+            byTop = -1
+            byLeft = -1
+        }
+        
+        for top in stride(from: fromTop, to: toTop, by: byTop) {
+            for left in stride(from: fromLeft, to: toLeft, by: byLeft) {
+                let pix = isPortrait ? simd_float2(Float(top), Float(left)) : simd_float2(Float(left), Float(top))
                 let clamped = clamp(simd_int2(pix), min: .zero, max: pixelSize &- simd_int2(1,1))
                 let bytesPerRow = CVPixelBufferGetBytesPerRow(self)
                 let row = Int(clamped.y)
@@ -314,6 +364,23 @@ extension CVPixelBuffer {
         }
         
         return depthArray
+    }
+    
+    func rotate(side: CGImagePropertyOrientation, coreImageContext: CIContext) -> CVPixelBuffer {
+        var newPixelBuffer: CVPixelBuffer?
+        let error = CVPixelBufferCreate(kCFAllocatorDefault,
+                        CVPixelBufferGetHeight(self),
+                        CVPixelBufferGetWidth(self),
+                        kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+                        nil,
+                        &newPixelBuffer)
+        guard error == kCVReturnSuccess,
+           let buffer = newPixelBuffer else {
+           return self
+        }
+        let ciImage = CIImage(cvPixelBuffer: self).oriented(side)
+        coreImageContext.render(ciImage, to: buffer)
+        return buffer
     }
 }
 

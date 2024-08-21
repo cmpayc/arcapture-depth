@@ -3,6 +3,7 @@
 //  ARCapture framework
 //
 //  Created by Volkov Alexander on 6/6/21.
+//  Modified by Sergei Kazakov on 21.08.24.
 //
 
 import Foundation
@@ -27,6 +28,8 @@ class ARAssetCreator: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
     private var needRecordAudio: Bool = false
     private var startTime: CMTime?
     
+    private var videoSize: CGSize = CGSize(width: 1920, height: 1440)
+    
     init(outputURL: URL, size: CGSize, captureType: ARFrameGenerator.CaptureType, optimizeForNetworkUs: Bool, audioEnabled: Bool, queue: DispatchQueue, mixWithOthers: Bool) throws {
         super.init()
         assetWriter = try AVAssetWriter(outputURL: outputURL, fileType: AVFileType.mp4)
@@ -47,10 +50,10 @@ class ARAssetCreator: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
                 self?.tryAddAudioInput(with: queue)
             })
         }
-        var effectiveSize = size
-        //if size.height < size.width && captureType == .renderWithDeviceRotation {
-        //    effectiveSize = CGSize(width: size.height, height: size.width)
-        //}
+        var effectiveSize = CGSize(width: videoSize.width, height: videoSize.height)
+        if ARCapture.Orientation.isPortrait {
+            effectiveSize = CGSize(width: videoSize.height, height: videoSize.width)
+        }
         videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264 as AnyObject,
             AVVideoWidthKey: Int(effectiveSize.width) as AnyObject,
