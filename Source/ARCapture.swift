@@ -177,6 +177,7 @@ open class ARCapture {
                 self?.prepareCallback = nil
                 self?.displayTimer.isPaused = true
                 self?.assetCreator = nil
+                self?.depthAssetCreator = nil
                 self?.frameGenerator = nil
             }
         }
@@ -359,6 +360,7 @@ open class ARCapture {
                             size: size, captureType: self!.frameGenerator!.captureType,
                             optimizeForNetworkUs: false,
                             audioEnabled: self!.recordAudio,
+                            forceSize: false,
                             queue: self!.queue,
                             mixWithOthers: false)
                     }

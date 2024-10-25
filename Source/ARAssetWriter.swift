@@ -10,13 +10,13 @@ import Foundation
 import AVFoundation
 
 // Assert creator
-class ARAssetCreator: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
+open class ARAssetCreator: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
     
     /// the queue used to write auduo
     private let audioQueue = DispatchQueue(label: "ru.frgroup.volk.ARAssetCreator")
     
     /// the last occured error
-    var lastError: Error?
+    public var lastError: Error?
     
     ///
     private var assetWriter: AVAssetWriter!
@@ -30,7 +30,7 @@ class ARAssetCreator: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
     
     private var videoSize: CGSize = CGSize(width: 1920, height: 1440)
     
-    init(outputURL: URL, size: CGSize, captureType: ARFrameGenerator.CaptureType, optimizeForNetworkUs: Bool, audioEnabled: Bool, queue: DispatchQueue, mixWithOthers: Bool) throws {
+    public init(outputURL: URL, size: CGSize, captureType: ARFrameGenerator.CaptureType, optimizeForNetworkUs: Bool, audioEnabled: Bool, forceSize: Bool, queue: DispatchQueue, mixWithOthers: Bool) throws {
         super.init()
         assetWriter = try AVAssetWriter(outputURL: outputURL, fileType: AVFileType.mp4)
         if audioEnabled {
@@ -50,9 +50,9 @@ class ARAssetCreator: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
                 self?.tryAddAudioInput(with: queue)
             })
         }
-        var effectiveSize = CGSize(width: videoSize.width, height: videoSize.height)
-        if ARCapture.Orientation.isPortrait {
-            effectiveSize = CGSize(width: videoSize.height, height: videoSize.width)
+        var effectiveSize = CGSize(width: forceSize ? size.width : videoSize.width, height: forceSize ? size.height : videoSize.height)
+        if (ARCapture.Orientation.isPortrait && !forceSize) {
+          effectiveSize = CGSize(width: forceSize ? size.height : videoSize.height, height: forceSize ? size.width : videoSize.width)
         }
         videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264 as AnyObject,
@@ -88,6 +88,8 @@ class ARAssetCreator: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
             throw error
         }
         assetWriter.shouldOptimizeForNetworkUse = optimizeForNetworkUs
+      
+        assetWriter.startWriting()
     }
     
     /// Try add audio into the video
@@ -132,7 +134,12 @@ class ARAssetCreator: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
     /// - Parameters:
     ///   - buffer: the buffer
     ///   - time: the effective time
-    func append(buffer: CVImageBuffer, with time: CMTime) {
+    public func append(buffer: CVImageBuffer, with time: CMTime) {
+        if (startTime == nil) {
+            startTime = time
+            assetWriter.startSession(atSourceTime: time)
+        }
+        /*
         if assetWriter.status == .unknown {
             guard startTime == nil else { return }
             startTime = time
@@ -150,6 +157,13 @@ class ARAssetCreator: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
             needRecordAudio = false
             return
         }
+        */
+        if assetWriter.status == .failed {
+            lastError = assetWriter.error
+            print("ERROR: \(String(describing: assetWriter.error))")
+            needRecordAudio = false
+            return
+        }
         
         if videoInput.isReadyForMoreMediaData {
             self.buffer.append(buffer, withPresentationTime: time)
@@ -157,7 +171,7 @@ class ARAssetCreator: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
         }
     }
     
-    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+    public func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let input = audioInput else { return }
         audioQueue.async { [weak self] in
             if let needRecordAudio = self?.needRecordAudio, needRecordAudio,
@@ -175,7 +189,7 @@ class ARAssetCreator: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
     
     /// Stop writing video
     /// - Parameter completed: the completion callback
-    func stop(completed: @escaping () -> ()) {
+    public func stop(completed: @escaping () -> ()) {
         if let session = session, session.isRunning {
             session.stopRunning()
         }
@@ -193,5 +207,9 @@ class ARAssetCreator: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
         }
         needRecordAudio = false
         assetWriter.cancelWriting()
+    }
+  
+    public func isStarted() -> Bool {
+        return startTime != nil
     }
 }

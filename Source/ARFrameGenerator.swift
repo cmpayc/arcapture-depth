@@ -277,7 +277,7 @@ extension CVPixelBuffer {
         }
     }
     
-    func toFlatArray(isPortrait: Bool, isLandscapeRight: Bool) -> [Float] {
+    public func toFlatArray(isPortrait: Bool, isLandscapeRight: Bool) -> [Float] {
         var depthArray = [Float]()
         let pixelSize = self.pixelSize
         guard pixelSize.x > 0 && pixelSize.y > 0 else { return depthArray }
@@ -366,7 +366,7 @@ extension CVPixelBuffer {
         return depthArray
     }
     
-    func rotate(side: CGImagePropertyOrientation, coreImageContext: CIContext) -> CVPixelBuffer {
+    public func rotate(side: CGImagePropertyOrientation, coreImageContext: CIContext) -> CVPixelBuffer {
         var newPixelBuffer: CVPixelBuffer?
         let error = CVPixelBufferCreate(kCFAllocatorDefault,
                         CVPixelBufferGetHeight(self),
@@ -382,5 +382,35 @@ extension CVPixelBuffer {
         coreImageContext.render(ciImage, to: buffer)
         return buffer
     }
-}
+    
+    public func resize(size: CGSize, coreImageContext: CIContext) -> CVPixelBuffer {
+        var newPixelBuffer: CVPixelBuffer?
+        let error = CVPixelBufferCreate(kCFAllocatorDefault,
+                        Int(size.width),
+                        Int(size.height),
+                        kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+                        nil,
+                        &newPixelBuffer)
+        guard error == kCVReturnSuccess,
+           let buffer = newPixelBuffer else {
+           return self
+        }
+        let ciImage = CIImage(cvPixelBuffer: self)
+        
+        let scale = min(size.width, size.height) / min(ciImage.extent.size.width, ciImage.extent.size.height)
+        let transformedImage = ciImage.transformed(by: .init(scaleX: scale, y: scale))
 
+        let width = transformedImage.extent.width
+        let height = transformedImage.extent.height
+        let xOffset = ((width - size.width) / 2).rounded(.down)
+        let yOffset = ((height - size.height) / 2).rounded(.down)
+        let rect = CGRect(x: xOffset, y: yOffset, width: size.width, height: size.height)
+
+        let resizedImage = transformedImage
+          .clamped(to: rect)
+          .cropped(to: rect)
+        
+        coreImageContext.render(resizedImage, to: buffer)
+        return buffer
+      }
+}
